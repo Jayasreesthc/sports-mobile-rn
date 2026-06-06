@@ -1,20 +1,45 @@
-import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import React, { useState } from 'react';
+import { SafeAreaView, StyleSheet, StatusBar } from 'react-native';
+import ApiClient from './src/core/network/api_client';
+import AuthScreen from './src/features/dashboard/screens/AuthScreen';
+import DashboardScreen from './src/features/dashboard/screens/DashboardScreen';
+
+const apiClient = new ApiClient();
 
 export default function App() {
+  const [currentUser, setCurrentUser] = useState(null);
+
+  const handleLoginSuccess = (userProfile) => {
+    setCurrentUser(userProfile);
+  };
+
+  const handleLogout = () => {
+    apiClient.setToken('');
+    setCurrentUser(null);
+  };
+
   return (
-    <View style={styles.container}>
-      <Text>Open up App.js to start working on your app!</Text>
-      <StatusBar style="auto" />
-    </View>
+    <SafeAreaView style={styles.safeArea}>
+      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
+      {currentUser ? (
+        <DashboardScreen
+          apiClient={apiClient}
+          user={currentUser}
+          onLogout={handleLogout}
+        />
+      ) : (
+        <AuthScreen
+          apiClient={apiClient}
+          onLoginSuccess={handleLoginSuccess}
+        />
+      )}
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  safeArea: {
     flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
   },
 });
