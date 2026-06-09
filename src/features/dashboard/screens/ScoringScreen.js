@@ -176,6 +176,31 @@ const ScoringScreen = ({ match, tournaments, apiClient, onBack }) => {
     });
   };
 
+  const getPerformancesForState = (stateStats) => {
+    return Object.keys(stateStats || {}).map(name => {
+      const pId = getPlayerIdByName(name);
+      const stats = stateStats[name];
+      if (!pId) return null;
+      return {
+        player_id: pId,
+        runs_scored: stats.runs ?? 0,
+        balls_faced: stats.balls ?? 0,
+        wickets_taken: stats.wickets ?? 0,
+        runs_conceded: stats.runsConceded ?? 0
+      };
+    }).filter(Boolean);
+  };
+
+  const saveLiveStatsToLocal = (stats) => {
+    if (typeof window !== 'undefined' && window.localStorage && matchId) {
+      try {
+        window.localStorage.setItem(`live_player_stats_${matchId}`, JSON.stringify(stats));
+      } catch (e) {
+        console.error('Error saving live player stats:', e);
+      }
+    }
+  };
+
   const handleUndo = async () => {
     if (historyStack.length === 0) return;
     const lastState = historyStack[historyStack.length - 1];
@@ -193,6 +218,7 @@ const ScoringScreen = ({ match, tournaments, apiClient, onBack }) => {
     setWickets1Score(lastState.wickets1Score);
     setOvers1Score(lastState.overs1Score);
     setPlayerStats(lastState.playerStats || {});
+    saveLiveStatsToLocal(lastState.playerStats || {});
     setFallOfWickets(lastState.fallOfWickets || []);
     setPartnershipRuns(lastState.partnershipRuns || 0);
     setPartnershipBalls(lastState.partnershipBalls || 0);
@@ -201,7 +227,8 @@ const ScoringScreen = ({ match, tournaments, apiClient, onBack }) => {
 
     const battingTeamLabel = lastState.inningsNum === 1 ? 'team_a' : 'team_b';
     const formattedOvers = parseFloat(`${lastState.overs}.${lastState.balls}`);
-    await apiClient.updateLiveScore(matchId, battingTeamLabel, lastState.runs, lastState.wickets, formattedOvers);
+    const livePerfs = getPerformancesForState(lastState.playerStats);
+    await apiClient.updateLiveScore(matchId, battingTeamLabel, lastState.runs, lastState.wickets, formattedOvers, livePerfs);
   };
 
   const handleRevertToState = async (index) => {
@@ -221,6 +248,7 @@ const ScoringScreen = ({ match, tournaments, apiClient, onBack }) => {
     setWickets1Score(targetState.wickets1Score);
     setOvers1Score(targetState.overs1Score);
     setPlayerStats(targetState.playerStats || {});
+    saveLiveStatsToLocal(targetState.playerStats || {});
     setFallOfWickets(targetState.fallOfWickets || []);
     setPartnershipRuns(targetState.partnershipRuns || 0);
     setPartnershipBalls(targetState.partnershipBalls || 0);
@@ -230,16 +258,17 @@ const ScoringScreen = ({ match, tournaments, apiClient, onBack }) => {
 
     const battingTeamLabel = targetState.inningsNum === 1 ? 'team_a' : 'team_b';
     const formattedOvers = parseFloat(`${targetState.overs}.${targetState.balls}`);
-    await apiClient.updateLiveScore(matchId, battingTeamLabel, targetState.runs, targetState.wickets, formattedOvers);
+    const livePerfs = getPerformancesForState(targetState.playerStats);
+    await apiClient.updateLiveScore(matchId, battingTeamLabel, targetState.runs, targetState.wickets, formattedOvers, livePerfs);
     alert('Reverted to selected delivery state.');
   };
 
   const persistLiveScore = useCallback(
-    async (newRuns, newWickets, newOvers, newBalls, currentInnings = inningsNum) => {
+    async (newRuns, newWickets, newOvers, newBalls, currentInnings = inningsNum, livePerfs = []) => {
       if (!matchId) return;
       const battingTeamLabel = currentInnings === 1 ? 'team_a' : 'team_b';
       const formattedOvers = parseFloat(`${newOvers}.${newBalls}`);
-      await apiClient.updateLiveScore(matchId, battingTeamLabel, newRuns, newWickets, formattedOvers);
+      await apiClient.updateLiveScore(matchId, battingTeamLabel, newRuns, newWickets, formattedOvers, livePerfs);
     },
     [matchId, inningsNum]
   );
@@ -317,50 +346,49 @@ const ScoringScreen = ({ match, tournaments, apiClient, onBack }) => {
     }
 
     // Update playerStats state
-    setPlayerStats((prev) => {
-      const next = { ...prev };
-      
-      if (striker) {
-        if (!next[striker]) {
-          next[striker] = { runs: 0, balls: 0, fours: 0, sixes: 0, ballsConceded: 0, runsConceded: 0, wickets: 0 };
-        }
-        const st = { ...next[striker] };
-        if (isLegalDelivery) {
-          st.balls += 1;
-        }
-        if (type === 'run') {
-          st.runs += value;
-          if (value === 4) st.fours += 1;
-          if (value === 6) st.sixes += 1;
-        }
-        next[striker] = st;
+    const nextStats = { ...playerStats };
+    
+    if (striker) {
+      if (!nextStats[striker]) {
+        nextStats[striker] = { runs: 0, balls: 0, fours: 0, sixes: 0, ballsConceded: 0, runsConceded: 0, wickets: 0 };
       }
-
-      if (nonStriker && !next[nonStriker]) {
-        next[nonStriker] = { runs: 0, balls: 0, fours: 0, sixes: 0, ballsConceded: 0, runsConceded: 0, wickets: 0 };
+      const st = { ...nextStats[striker] };
+      if (isLegalDelivery) {
+        st.balls += 1;
       }
-
-      if (bowler) {
-        if (!next[bowler]) {
-          next[bowler] = { runs: 0, balls: 0, fours: 0, sixes: 0, ballsConceded: 0, runsConceded: 0, wickets: 0 };
-        }
-        const bw = { ...next[bowler] };
-        if (isLegalDelivery) {
-          bw.ballsConceded += 1;
-        }
-        if (type === 'run') {
-          bw.runsConceded += value;
-        } else if (type === 'wide' || type === 'noball') {
-          bw.runsConceded += (1 + value);
-        }
-        if (isWicket && dismissalType !== 'Run Out') {
-          bw.wickets += 1;
-        }
-        next[bowler] = bw;
+      if (type === 'run') {
+        st.runs += value;
+        if (value === 4) st.fours += 1;
+        if (value === 6) st.sixes += 1;
       }
+      nextStats[striker] = st;
+    }
 
-      return next;
-    });
+    if (nonStriker && !nextStats[nonStriker]) {
+      nextStats[nonStriker] = { runs: 0, balls: 0, fours: 0, sixes: 0, ballsConceded: 0, runsConceded: 0, wickets: 0 };
+    }
+
+    if (bowler) {
+      if (!nextStats[bowler]) {
+        nextStats[bowler] = { runs: 0, balls: 0, fours: 0, sixes: 0, ballsConceded: 0, runsConceded: 0, wickets: 0 };
+      }
+      const bw = { ...nextStats[bowler] };
+      if (isLegalDelivery) {
+        bw.ballsConceded += 1;
+      }
+      if (type === 'run') {
+        bw.runsConceded += value;
+      } else if (type === 'wide' || type === 'noball') {
+        bw.runsConceded += (1 + value);
+      }
+      if (isWicket && dismissalType !== 'Run Out') {
+        bw.wickets += 1;
+      }
+      nextStats[bowler] = bw;
+    }
+
+    setPlayerStats(nextStats);
+    saveLiveStatsToLocal(nextStats);
 
     let finalOvers = overs;
     let finalBalls = balls;
@@ -404,7 +432,8 @@ const ScoringScreen = ({ match, tournaments, apiClient, onBack }) => {
       setCurrentOver((prev) => [...prev, ballMarker]);
     }
 
-    persistLiveScore(newRuns, newWickets, finalOvers, finalBalls, inningsNum);
+    const livePerfs = getPerformancesForState(nextStats);
+    persistLiveScore(newRuns, newWickets, finalOvers, finalBalls, inningsNum, livePerfs);
 
     // Rotate strike on odd runs
     const runsRotates = value === 1 || value === 3;
@@ -448,6 +477,11 @@ const ScoringScreen = ({ match, tournaments, apiClient, onBack }) => {
     checkInningsStatus(runs, wickets, overs, balls);
   };
 
+  const handleConfirmOverSummary = () => {
+    setOverSummaryModalVisible(false);
+    setBowlerModalVisible(true);
+  };
+
   const handleScore = (value, type = 'run') => {
     if (type === 'run' && value > 0) {
       setPendingRunValue(value);
@@ -464,6 +498,18 @@ const ScoringScreen = ({ match, tournaments, apiClient, onBack }) => {
     }
   };
 
+  const getPlayerIdByName = (name) => {
+    if (match?.team_a?.players) {
+      const found = match.team_a.players.find(p => (p.player?.full_name || p.player?.email) === name);
+      if (found) return found.player_id || found.player?.id;
+    }
+    if (match?.team_b?.players) {
+      const found = match.team_b.players.find(p => (p.player?.full_name || p.player?.email) === name);
+      if (found) return found.player_id || found.player?.id;
+    }
+    return null;
+  };
+
   const handleSaveAndFinish = async (finalRuns = runs, finalWickets = wickets, finalOvers = overs, finalBalls = balls) => {
     let outcomeText = '';
     let winnerId = match.team_a_id;
@@ -477,7 +523,20 @@ const ScoringScreen = ({ match, tournaments, apiClient, onBack }) => {
       winnerId = match.team_a_id;
     }
 
-    await apiClient.completeMatch(matchId, winnerId, []);
+    const performances = Object.keys(playerStats).map(name => {
+      const pId = getPlayerIdByName(name);
+      const stats = playerStats[name];
+      if (!pId) return null;
+      return {
+        player_id: pId,
+        runs_scored: stats.runs ?? 0,
+        balls_faced: stats.balls ?? 0,
+        wickets_taken: stats.wickets ?? 0,
+        runs_conceded: stats.runsConceded ?? 0
+      };
+    }).filter(Boolean);
+
+    await apiClient.completeMatch(matchId, winnerId, performances);
     alert(`Match Completed! ${outcomeText}`);
     onBack();
   };

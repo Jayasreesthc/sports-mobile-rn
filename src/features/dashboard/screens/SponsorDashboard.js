@@ -15,6 +15,7 @@ import StatCard from '../widgets/StatCard';
 
 const SponsorDashboard = ({
   data,
+  user = {},
   notifications = [],
   tournaments = [],
   apiClient,
@@ -135,6 +136,7 @@ const SponsorDashboard = ({
   const [loadingMatches, setLoadingMatches] = useState(false);
   const [selectedMatch, setSelectedMatch] = useState(null);
   const [matchDetailsTab, setMatchDetailsTab] = useState('Summary'); // 'Summary', 'Scorecard'
+  const [loadingScorecard, setLoadingScorecard] = useState(false);
 
   // Spring animations
   const btnScale = useRef(new Animated.Value(1)).current;
@@ -198,6 +200,41 @@ const SponsorDashboard = ({
     }
   };
 
+  const handleSelectMatch = async (matchItem) => {
+    setSelectedMatch(matchItem);
+    setMatchDetailsTab('Summary');
+    try {
+      const fullMatch = await apiClient.request(`${apiClient.constructor.baseUrl}/matches/${matchItem.id}`);
+      if (fullMatch && !fullMatch.detail) {
+        setSelectedMatch({ ...fullMatch, tournamentName: matchItem.tournamentName });
+      }
+    } catch (e) {
+      console.log('Error fetching match details:', e);
+    }
+  };
+
+  const refreshMatchScorecard = async () => {
+    if (!selectedMatch) return;
+    setLoadingScorecard(true);
+    try {
+      const fullMatch = await apiClient.request(`${apiClient.constructor.baseUrl}/matches/${selectedMatch.id}`);
+      if (fullMatch && !fullMatch.detail) {
+        setSelectedMatch(prev => ({ ...fullMatch, tournamentName: prev?.tournamentName }));
+      }
+    } catch (e) {
+      console.log('Error refreshing scorecard:', e);
+    } finally {
+      setLoadingScorecard(false);
+    }
+  };
+
+  const handleMatchDetailsTabChange = (tab) => {
+    setMatchDetailsTab(tab);
+    if (tab === 'Scorecard') {
+      refreshMatchScorecard();
+    }
+  };
+
   useEffect(() => {
     fetchMatches();
   }, [tournaments]);
@@ -217,7 +254,7 @@ const SponsorDashboard = ({
       const res = await apiClient.sponsorTournament(tourneyIdInt, amountFloat);
 
       if (res && res.id) {
-        setMessage(`Pledge of $${amount} submitted for approval!`);
+        setMessage(`Pledge of ₹${amount} submitted for approval!`);
         
         // Append local simulated entry so UI updates immediately
         const targetTourney = tournaments.find(t => t.id === tourneyIdInt);
@@ -400,34 +437,22 @@ const SponsorDashboard = ({
           <View>
 
 
-            {/* Budget overview breakdown */}
+            {/* Budget overview breakdown replaced with Sponsor Profile & Events count */}
             <View style={styles.budgetCard}>
-              <Text style={styles.budgetCardTitle}>SPONSORSHIP BUDGET ALLOCATION</Text>
+              <Text style={styles.budgetCardTitle}>SPONSOR PROFILE DETAILS</Text>
               
-              {/* Stacked bar representation */}
-              <View style={styles.progressBarWrapper}>
-                <View style={[styles.progressBarSec, { flex: spentTotal, backgroundColor: '#D4AF37' }]} />
-                <View style={[styles.progressBarSec, { flex: approvedTotal, backgroundColor: '#4CD964' }]} />
-                <View style={[styles.progressBarSec, { flex: pledgedTotal, backgroundColor: '#FFCC00' }]} />
-                <View style={[styles.progressBarSec, { flex: Math.max(0, remainingBudget), backgroundColor: '#333' }]} />
-              </View>
-
-              <View style={styles.budgetGrid}>
-                <View style={styles.budgetCol}>
-                  <Text style={[styles.budgetVal, { color: '#FFF' }]}>${totalBudget.toLocaleString()}</Text>
-                  <Text style={styles.budgetLabel}>Total Limit</Text>
+              <View style={[styles.budgetGrid, { paddingVertical: 10 }]}>
+                <View style={[styles.budgetCol, { flex: 1.5, alignItems: 'flex-start' }]}>
+                  <Text style={[styles.budgetVal, { color: '#FFF', fontSize: 18, fontFamily: 'Poppins-Bold' }]}>
+                    {user.full_name || user.email?.split('@')[0] || 'Sponsor'}
+                  </Text>
+                  <Text style={styles.budgetLabel}>Sponsor Name</Text>
                 </View>
-                <View style={styles.budgetCol}>
-                  <Text style={[styles.budgetVal, { color: '#D4AF37' }]}>${spentTotal.toLocaleString()}</Text>
-                  <Text style={styles.budgetLabel}>Spent (Active)</Text>
-                </View>
-                <View style={styles.budgetCol}>
-                  <Text style={[styles.budgetVal, { color: '#4CD964' }]}>${approvedTotal.toLocaleString()}</Text>
-                  <Text style={styles.budgetLabel}>Approved</Text>
-                </View>
-                <View style={styles.budgetCol}>
-                  <Text style={[styles.budgetVal, { color: '#FFCC00' }]}>${pledgedTotal.toLocaleString()}</Text>
-                  <Text style={styles.budgetLabel}>Pledged/Review</Text>
+                <View style={[styles.budgetCol, { flex: 1, alignItems: 'flex-end' }]}>
+                  <Text style={[styles.budgetVal, { color: '#D4AF37', fontSize: 22, fontFamily: 'Poppins-Bold' }]}>
+                    {pledgesList.length}
+                  </Text>
+                  <Text style={styles.budgetLabel}>Events Sponsored</Text>
                 </View>
               </View>
             </View>
@@ -541,7 +566,7 @@ const SponsorDashboard = ({
                 )}
 
                 {/* Pledge Amount */}
-                <Text style={styles.label}>Pledge Amount ($)</Text>
+                <Text style={styles.label}>Pledge Amount (₹)</Text>
                 <TextInput
                   style={styles.input}
                   placeholder="e.g. 1500"
@@ -633,7 +658,7 @@ const SponsorDashboard = ({
                         <Text style={styles.tournamentName}>{item.tournament_name}</Text>
                         <Text style={styles.tournamentStatus}>Tournament Status: {item.tournament_status}</Text>
                       </View>
-                      <Text style={styles.pledgeAmount}>${item.amount}</Text>
+                      <Text style={styles.pledgeAmount}>₹{item.amount}</Text>
                     </View>
 
                     {/* Stepper Status tracker */}
@@ -679,10 +704,7 @@ const SponsorDashboard = ({
                   key={match.id}
                   style={styles.matchCard}
                   activeOpacity={0.9}
-                  onPress={() => {
-                    setSelectedMatch(match);
-                    setMatchDetailsTab('Summary');
-                  }}
+                  onPress={() => handleSelectMatch(match)}
                 >
                   <View style={styles.matchMain}>
                     <Text style={styles.matchTeams}>
@@ -750,7 +772,7 @@ const SponsorDashboard = ({
                         styles.modalTabButton,
                         matchDetailsTab === tab && styles.modalTabButtonActive,
                       ]}
-                      onPress={() => setMatchDetailsTab(tab)}
+                      onPress={() => handleMatchDetailsTabChange(tab)}
                     >
                       <Text
                         style={[
@@ -804,13 +826,40 @@ const SponsorDashboard = ({
 
                   {matchDetailsTab === 'Scorecard' && (
                     <View style={styles.scorecardContainer}>
+                      {/* Refresh button */}
+                      <TouchableOpacity
+                        onPress={refreshMatchScorecard}
+                        style={{ alignSelf: 'flex-end', marginBottom: 10, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: '#D4AF37', borderRadius: 8, flexDirection: 'row', alignItems: 'center' }}
+                      >
+                        {loadingScorecard
+                          ? <ActivityIndicator size="small" color="#1A1A1A" />
+                          : <Text style={{ color: '#1A1A1A', fontWeight: 'bold', fontSize: 12 }}>⟳ Refresh Scorecard</Text>
+                        }
+                      </TouchableOpacity>
+
                       <Text style={styles.scorecardTeamTitle}>{selectedMatch.team_a?.name || selectedMatch.team_a_name || 'Team A'} Roster</Text>
                       <View style={{ marginBottom: 16, paddingLeft: 4 }}>
-                        {(selectedMatch.team_a?.players || []).map((p, idx) => (
-                          <Text key={idx} style={{ fontSize: 14, color: '#F5F5F5', marginVertical: 6 }}>
-                            👤 {p.player?.full_name || p.player?.email || 'Unknown Player'}
-                          </Text>
-                        ))}
+                        {(selectedMatch.team_a?.players || []).map((p, idx) => {
+                          const pId = p.player_id || p.player?.id;
+                          const perf = (selectedMatch.performances || []).find(pf => String(pf.player_id) === String(pId));
+                          const pName = p.player?.full_name || p.player?.email;
+
+                          const runs = perf?.runs_scored ?? p.runs_scored ?? p.performance?.runs_scored ?? 0;
+                          const balls = perf?.balls_faced ?? p.balls_faced ?? p.performance?.balls_faced ?? 0;
+                          const wickets = perf?.wickets_taken ?? p.wickets_taken ?? p.performance?.wickets_taken ?? 0;
+                          const conceded = perf?.runs_conceded ?? p.runs_conceded ?? p.performance?.runs_conceded ?? 0;
+                          return (
+                            <View key={idx} style={{ marginVertical: 6, backgroundColor: '#1E1E1E', borderRadius: 8, padding: 10 }}>
+                              <Text style={{ fontSize: 14, color: '#F5F5F5', fontWeight: '600' }}>
+                                👤 {pName || 'Unknown Player'}
+                              </Text>
+                              <View style={{ flexDirection: 'row', marginTop: 4, gap: 16 }}>
+                                <Text style={{ fontSize: 12, color: '#D4AF37' }}>🏏 {runs} runs ({balls}b)</Text>
+                                <Text style={{ fontSize: 12, color: '#81C784' }}>⚾ {wickets} wkt ({conceded}r)</Text>
+                              </View>
+                            </View>
+                          );
+                        })}
                         {(!selectedMatch.team_a?.players || selectedMatch.team_a.players.length === 0) && (
                           <Text style={{ fontSize: 13, color: '#888', fontStyle: 'italic' }}>No registered players.</Text>
                         )}
@@ -818,11 +867,27 @@ const SponsorDashboard = ({
 
                       <Text style={styles.scorecardTeamTitle}>{selectedMatch.team_b?.name || selectedMatch.team_b_name || 'Team B'} Roster</Text>
                       <View style={{ paddingLeft: 4 }}>
-                        {(selectedMatch.team_b?.players || []).map((p, idx) => (
-                          <Text key={idx} style={{ fontSize: 14, color: '#F5F5F5', marginVertical: 6 }}>
-                            👤 {p.player?.full_name || p.player?.email || 'Unknown Player'}
-                          </Text>
-                        ))}
+                        {(selectedMatch.team_b?.players || []).map((p, idx) => {
+                          const pId = p.player_id || p.player?.id;
+                          const perf = (selectedMatch.performances || []).find(pf => String(pf.player_id) === String(pId));
+                          const pName = p.player?.full_name || p.player?.email;
+
+                          const runs = perf?.runs_scored ?? p.runs_scored ?? p.performance?.runs_scored ?? 0;
+                          const balls = perf?.balls_faced ?? p.balls_faced ?? p.performance?.balls_faced ?? 0;
+                          const wickets = perf?.wickets_taken ?? p.wickets_taken ?? p.performance?.wickets_taken ?? 0;
+                          const conceded = perf?.runs_conceded ?? p.runs_conceded ?? p.performance?.runs_conceded ?? 0;
+                          return (
+                            <View key={idx} style={{ marginVertical: 6, backgroundColor: '#1E1E1E', borderRadius: 8, padding: 10 }}>
+                              <Text style={{ fontSize: 14, color: '#F5F5F5', fontWeight: '600' }}>
+                                👤 {pName || 'Unknown Player'}
+                              </Text>
+                              <View style={{ flexDirection: 'row', marginTop: 4, gap: 16 }}>
+                                <Text style={{ fontSize: 12, color: '#D4AF37' }}>🏏 {runs} runs ({balls}b)</Text>
+                                <Text style={{ fontSize: 12, color: '#81C784' }}>⚾ {wickets} wkt ({conceded}r)</Text>
+                              </View>
+                            </View>
+                          );
+                        })}
                         {(!selectedMatch.team_b?.players || selectedMatch.team_b.players.length === 0) && (
                           <Text style={{ fontSize: 13, color: '#888', fontStyle: 'italic' }}>No registered players.</Text>
                         )}

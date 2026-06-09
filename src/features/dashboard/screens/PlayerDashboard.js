@@ -22,6 +22,8 @@ const PlayerDashboard = ({
   apiClient,
   onRefresh,
   activeTab: parentActiveTab,
+  selectedTournamentIdForModal,
+  setSelectedTournamentIdForModal,
 }) => {
   const matches = data.matches_played ?? 0;
   const wins = data.matches_won ?? 0;
@@ -32,6 +34,18 @@ const PlayerDashboard = ({
   const [localTab, setLocalTab] = useState('Overview'); // 'Overview', 'Statistics', 'Matches'
   const activeTab = parentActiveTab || localTab;
   const setActiveTab = setLocalTab;
+
+  useEffect(() => {
+    if (selectedTournamentIdForModal && tournaments.length > 0) {
+      const tourney = tournaments.find(t => t.id === selectedTournamentIdForModal);
+      if (tourney) {
+        setSelectedTournamentDetails(tourney);
+        if (setSelectedTournamentIdForModal) {
+          setSelectedTournamentIdForModal(null);
+        }
+      }
+    }
+  }, [selectedTournamentIdForModal, tournaments]);
 
   const slideAnim = useRef(new Animated.Value(0)).current;
   const fadeAnim = useRef(new Animated.Value(1)).current;
@@ -101,6 +115,7 @@ const PlayerDashboard = ({
   const [matchDetailsTab, setMatchDetailsTab] = useState('Summary'); // 'Summary', 'Scorecard', 'WagonWheel'
   const [matchesList, setMatchesList] = useState([]);
   const [loadingMatches, setLoadingMatches] = useState(false);
+  const [loadingScorecard, setLoadingScorecard] = useState(false);
 
   // Animated scaling for spring tap effects
   const squadBtnScale = useRef(new Animated.Value(1)).current;
@@ -200,6 +215,41 @@ const PlayerDashboard = ({
       console.log('Error fetching tournament matches:', e);
     } finally {
       setLoadingMatches(false);
+    }
+  };
+
+  const handleSelectMatch = async (matchItem) => {
+    setSelectedMatch(matchItem);
+    setMatchDetailsTab('Summary');
+    try {
+      const fullMatch = await apiClient.request(`${apiClient.constructor.baseUrl}/matches/${matchItem.id}`);
+      if (fullMatch && !fullMatch.detail) {
+        setSelectedMatch({ ...fullMatch, tournamentName: matchItem.tournamentName });
+      }
+    } catch (e) {
+      console.log('Error fetching match details:', e);
+    }
+  };
+
+  const refreshMatchScorecard = async () => {
+    if (!selectedMatch) return;
+    setLoadingScorecard(true);
+    try {
+      const fullMatch = await apiClient.request(`${apiClient.constructor.baseUrl}/matches/${selectedMatch.id}`);
+      if (fullMatch && !fullMatch.detail) {
+        setSelectedMatch(prev => ({ ...fullMatch, tournamentName: prev?.tournamentName }));
+      }
+    } catch (e) {
+      console.log('Error refreshing scorecard:', e);
+    } finally {
+      setLoadingScorecard(false);
+    }
+  };
+
+  const handleMatchDetailsTabChange = (tab) => {
+    setMatchDetailsTab(tab);
+    if (tab === 'Scorecard') {
+      refreshMatchScorecard();
     }
   };
 
@@ -612,7 +662,7 @@ const PlayerDashboard = ({
                       )}
                     </View>
                     {t.city && <Text style={{ color: '#888', fontSize: 11, paddingLeft: 32 }}>📍 {t.city}{t.ground_name ? ` · ${t.ground_name}` : ''}</Text>}
-                    {t.fee > 0 && <Text style={{ color: '#D4AF37', fontSize: 11, paddingLeft: 32 }}>Entry: ${t.fee}</Text>}
+                    {t.fee > 0 && <Text style={{ color: '#D4AF37', fontSize: 11, paddingLeft: 32 }}>Entry: ₹{t.fee}</Text>}
                   </TouchableOpacity>
                   );
                 })
@@ -705,10 +755,7 @@ const PlayerDashboard = ({
                   key={match.id}
                   style={styles.matchCard}
                   activeOpacity={0.95}
-                  onPress={() => {
-                    setSelectedMatch(match);
-                    setMatchDetailsTab('Summary');
-                  }}
+                  onPress={() => handleSelectMatch(match)}
                 >
                   <View style={styles.matchMain}>
                     <Text style={styles.matchTeams}>
@@ -801,7 +848,7 @@ const PlayerDashboard = ({
                         styles.modalTabButton,
                         matchDetailsTab === tab && styles.modalTabButtonActive,
                       ]}
-                      onPress={() => setMatchDetailsTab(tab)}
+                      onPress={() => handleMatchDetailsTabChange(tab)}
                     >
                       <Text
                         style={[
@@ -855,13 +902,40 @@ const PlayerDashboard = ({
 
                   {matchDetailsTab === 'Scorecard' && (
                     <View style={styles.scorecardContainer}>
+                      {/* Refresh button */}
+                      <TouchableOpacity
+                        onPress={refreshMatchScorecard}
+                        style={{ alignSelf: 'flex-end', marginBottom: 10, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: '#D4AF37', borderRadius: 8, flexDirection: 'row', alignItems: 'center' }}
+                      >
+                        {loadingScorecard
+                          ? <ActivityIndicator size="small" color="#1A1A1A" />
+                          : <Text style={{ color: '#1A1A1A', fontWeight: 'bold', fontSize: 12 }}>⟳ Refresh Scorecard</Text>
+                        }
+                      </TouchableOpacity>
+
                       <Text style={styles.scorecardTeamTitle}>{selectedMatch.team_a?.name || selectedMatch.team_a_name || 'Team A'} Roster</Text>
                       <View style={{ marginBottom: 16, paddingLeft: 4 }}>
-                        {(selectedMatch.team_a?.players || []).map((p, idx) => (
-                          <Text key={idx} style={{ fontSize: 14, color: '#F5F5F5', marginVertical: 6 }}>
-                            👤 {p.player?.full_name || p.player?.email || 'Unknown Player'}
-                          </Text>
-                        ))}
+                        {(selectedMatch.team_a?.players || []).map((p, idx) => {
+                          const pId = p.player_id || p.player?.id;
+                          const perf = (selectedMatch.performances || []).find(pf => String(pf.player_id) === String(pId));
+                          const pName = p.player?.full_name || p.player?.email;
+
+                          const runs = perf?.runs_scored ?? p.runs_scored ?? p.performance?.runs_scored ?? 0;
+                          const balls = perf?.balls_faced ?? p.balls_faced ?? p.performance?.balls_faced ?? 0;
+                          const wickets = perf?.wickets_taken ?? p.wickets_taken ?? p.performance?.wickets_taken ?? 0;
+                          const conceded = perf?.runs_conceded ?? p.runs_conceded ?? p.performance?.runs_conceded ?? 0;
+                          return (
+                            <View key={idx} style={{ marginVertical: 6, backgroundColor: '#1E1E1E', borderRadius: 8, padding: 10 }}>
+                              <Text style={{ fontSize: 14, color: '#F5F5F5', fontWeight: '600' }}>
+                                👤 {pName || 'Unknown Player'}
+                              </Text>
+                              <View style={{ flexDirection: 'row', marginTop: 4, gap: 16 }}>
+                                <Text style={{ fontSize: 12, color: '#D4AF37' }}>🏏 {runs} runs ({balls}b)</Text>
+                                <Text style={{ fontSize: 12, color: '#81C784' }}>⚾ {wickets} wkt ({conceded}r)</Text>
+                              </View>
+                            </View>
+                          );
+                        })}
                         {(!selectedMatch.team_a?.players || selectedMatch.team_a.players.length === 0) && (
                           <Text style={{ fontSize: 13, color: '#888', fontStyle: 'italic' }}>No registered players.</Text>
                         )}
@@ -869,11 +943,27 @@ const PlayerDashboard = ({
 
                       <Text style={styles.scorecardTeamTitle}>{selectedMatch.team_b?.name || selectedMatch.team_b_name || 'Team B'} Roster</Text>
                       <View style={{ paddingLeft: 4 }}>
-                        {(selectedMatch.team_b?.players || []).map((p, idx) => (
-                          <Text key={idx} style={{ fontSize: 14, color: '#F5F5F5', marginVertical: 6 }}>
-                            👤 {p.player?.full_name || p.player?.email || 'Unknown Player'}
-                          </Text>
-                        ))}
+                        {(selectedMatch.team_b?.players || []).map((p, idx) => {
+                          const pId = p.player_id || p.player?.id;
+                          const perf = (selectedMatch.performances || []).find(pf => String(pf.player_id) === String(pId));
+                          const pName = p.player?.full_name || p.player?.email;
+
+                          const runs = perf?.runs_scored ?? p.runs_scored ?? p.performance?.runs_scored ?? 0;
+                          const balls = perf?.balls_faced ?? p.balls_faced ?? p.performance?.balls_faced ?? 0;
+                          const wickets = perf?.wickets_taken ?? p.wickets_taken ?? p.performance?.wickets_taken ?? 0;
+                          const conceded = perf?.runs_conceded ?? p.runs_conceded ?? p.performance?.runs_conceded ?? 0;
+                          return (
+                            <View key={idx} style={{ marginVertical: 6, backgroundColor: '#1E1E1E', borderRadius: 8, padding: 10 }}>
+                              <Text style={{ fontSize: 14, color: '#F5F5F5', fontWeight: '600' }}>
+                                👤 {pName || 'Unknown Player'}
+                              </Text>
+                              <View style={{ flexDirection: 'row', marginTop: 4, gap: 16 }}>
+                                <Text style={{ fontSize: 12, color: '#D4AF37' }}>🏏 {runs} runs ({balls}b)</Text>
+                                <Text style={{ fontSize: 12, color: '#81C784' }}>⚾ {wickets} wkt ({conceded}r)</Text>
+                              </View>
+                            </View>
+                          );
+                        })}
                         {(!selectedMatch.team_b?.players || selectedMatch.team_b.players.length === 0) && (
                           <Text style={{ fontSize: 13, color: '#888', fontStyle: 'italic' }}>No registered players.</Text>
                         )}
@@ -957,7 +1047,7 @@ const PlayerDashboard = ({
                   <View style={styles.summaryStatItem}>
                     <Text style={styles.summaryLabel}>Registration Fee</Text>
                     <Text style={[styles.summaryVal, { color: '#D4AF37', fontWeight: 'bold' }]}>
-                      {selectedTournamentDetails.fee && selectedTournamentDetails.fee > 0 ? `$${selectedTournamentDetails.fee}` : 'Free'}
+                      {selectedTournamentDetails.fee && selectedTournamentDetails.fee > 0 ? `₹${selectedTournamentDetails.fee}` : 'Free'}
                     </Text>
                   </View>
 

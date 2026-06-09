@@ -175,7 +175,7 @@ class ApiClient {
   }
 
   // Scorer
-  async updateLiveScore(matchId, team, runs, wickets, overs) {
+  async updateLiveScore(matchId, team, runs, wickets, overs, performances = []) {
     return this.request(`${ApiClient.baseUrl}/matches/${matchId}/score`, {
       method: 'POST',
       headers: this.getHeaders(),
@@ -184,6 +184,7 @@ class ApiClient {
         runs,
         wickets,
         overs,
+        performances,
       }),
     });
   }

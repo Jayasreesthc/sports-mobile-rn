@@ -13,6 +13,59 @@ const DashboardScreen = ({ apiClient, user, onLogout }) => {
   const [coaches, setCoaches] = useState([]);
   const [players, setPlayers] = useState([]);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [seenNotificationIds, setSeenNotificationIds] = useState(() => {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const stored = window.localStorage.getItem(`seenNotifications_${user.email}`);
+        return new Set(stored ? JSON.parse(stored) : []);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    return new Set();
+  });
+
+  const unreadCount = notifications.filter(n => !seenNotificationIds.has(n.id)).length;
+
+  const [selectedTournamentIdForModal, setSelectedTournamentIdForModal] = useState(null);
+  const [selectedNotificationDetail, setSelectedNotificationDetail] = useState(null);
+
+  const handleNotificationClick = (log) => {
+    // Show notification details fully
+    setSelectedNotificationDetail(log);
+
+    if (tournaments.length > 0) {
+      let tourneyId = null;
+      // Extract tournament ID if present
+      const idMatch = (log.body + " " + log.subject).match(/(?:tournament\s*id\s*:?\s*|tournament\s*)(\d+)/i);
+      if (idMatch) {
+        tourneyId = parseInt(idMatch[1], 10);
+      }
+
+      let matchedTournament = null;
+      if (tourneyId) {
+        matchedTournament = tournaments.find(t => t.id === tourneyId);
+      }
+
+      if (!matchedTournament) {
+        matchedTournament = tournaments.find(t => 
+          (log.subject && log.subject.toLowerCase().includes(t.name.toLowerCase())) ||
+          (log.body && log.body.toLowerCase().includes(t.name.toLowerCase()))
+        );
+      }
+
+      if (matchedTournament) {
+        if (user.role === 'player') {
+          setActiveTab('Tournaments');
+          setSelectedTournamentIdForModal(matchedTournament.id);
+        } else if (user.role === 'sponsor') {
+          setActiveTab('Sponsorships');
+        } else if (user.role === 'coach') {
+          setActiveTab('Matches');
+        }
+      }
+    }
+  };
 
   const [activeTab, setActiveTab] = useState('');
 
@@ -80,7 +133,7 @@ const DashboardScreen = ({ apiClient, user, onLogout }) => {
       const fNotes = await apiClient.getNotificationLogs();
       const filteredNotes = Array.isArray(fNotes) ? fNotes.filter(n => n.recipient_email === user.email) : [];
       setNotifications(filteredNotes);
-      
+
       const resTourneys = await apiClient.request(`${apiClient.constructor.baseUrl}/tournaments`);
       setTournaments(Array.isArray(resTourneys) ? resTourneys : []);
     } catch (e) {
@@ -187,12 +240,17 @@ const DashboardScreen = ({ apiClient, user, onLogout }) => {
   );
 
   // Custom Bell Icon Component
-  const BellIcon = ({ color }) => (
+  const BellIcon = ({ color, count }) => (
     <View style={styles.bellIconContainer}>
       <View style={[styles.bellLoop, { borderColor: color }]} />
       <View style={[styles.bellBody, { backgroundColor: color }]} />
       <View style={[styles.bellLip, { backgroundColor: color }]} />
       <View style={[styles.bellClapper, { backgroundColor: color }]} />
+      {count > 0 && (
+        <View style={styles.bellBadge}>
+          <Text style={styles.bellBadgeText}>{count}</Text>
+        </View>
+      )}
     </View>
   );
 
@@ -231,7 +289,7 @@ const DashboardScreen = ({ apiClient, user, onLogout }) => {
 
   const MoneyIcon = ({ color }) => (
     <View style={[styles.tabIconMoneyContainer, { borderColor: color }]}>
-      <Text style={[styles.tabIconMoneyText, { color }]}>$</Text>
+      <Text style={[styles.tabIconMoneyText, { color }]}>₹</Text>
     </View>
   );
 
@@ -282,8 +340,22 @@ const DashboardScreen = ({ apiClient, user, onLogout }) => {
       {/* Custom Header */}
       <View style={styles.header}>
         <View style={styles.headerActions}>
-          <TouchableOpacity style={styles.notifyButton} onPress={() => setShowNotifications(true)}>
-            <BellIcon color="#F5F5F5" />
+          <TouchableOpacity
+            style={styles.notifyButton}
+            onPress={() => {
+              setShowNotifications(true);
+              const allIds = notifications.map(n => n.id);
+              setSeenNotificationIds(new Set(allIds));
+              try {
+                if (typeof window !== 'undefined' && window.localStorage) {
+                  window.localStorage.setItem(`seenNotifications_${user.email}`, JSON.stringify(allIds));
+                }
+              } catch (e) {
+                console.error(e);
+              }
+            }}
+          >
+            <BellIcon color="#F5F5F5" count={unreadCount} />
           </TouchableOpacity>
           <TouchableOpacity style={styles.logoutButton} onPress={onLogout} activeOpacity={0.7}>
             <LogoutIcon color="#F5F5F5" />
@@ -293,8 +365,8 @@ const DashboardScreen = ({ apiClient, user, onLogout }) => {
 
 
       {/* Main Content */}
-      <ScrollView 
-        style={styles.contentScroll} 
+      <ScrollView
+        style={styles.contentScroll}
         contentContainerStyle={styles.contentContainer}
         refreshControl={
           <RefreshControl
@@ -324,6 +396,8 @@ const DashboardScreen = ({ apiClient, user, onLogout }) => {
                 apiClient={apiClient}
                 onRefresh={fetchDashboard}
                 activeTab={activeTab}
+                selectedTournamentIdForModal={selectedTournamentIdForModal}
+                setSelectedTournamentIdForModal={setSelectedTournamentIdForModal}
               />
             )}
             {user.role === 'coach' && (
@@ -338,6 +412,7 @@ const DashboardScreen = ({ apiClient, user, onLogout }) => {
             {user.role === 'sponsor' && (
               <SponsorDashboard
                 data={data}
+                user={user}
                 notifications={notifications}
                 tournaments={tournaments}
                 apiClient={apiClient}
@@ -400,14 +475,70 @@ const DashboardScreen = ({ apiClient, user, onLogout }) => {
                 <Text style={styles.emptyNotifications}>No notification alerts received.</Text>
               ) : (
                 notifications.map((log) => (
-                  <View key={log.id} style={styles.notificationCard}>
+                  <TouchableOpacity
+                    key={log.id}
+                    style={styles.notificationCard}
+                    activeOpacity={0.75}
+                    onPress={() => handleNotificationClick(log)}
+                  >
                     <Text style={styles.noteSubject}>{log.subject}</Text>
                     <Text style={styles.noteBody}>{log.body}</Text>
                     <Text style={styles.noteTime}>{new Date(log.sent_at).toLocaleTimeString()}</Text>
-                  </View>
+                  </TouchableOpacity>
                 ))
               )}
             </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Notification Details Modal */}
+      <Modal
+        visible={selectedNotificationDetail !== null}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => setSelectedNotificationDetail(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxHeight: '60%', padding: 24 }]}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Notification Alert</Text>
+              <TouchableOpacity style={styles.closeButton} onPress={() => setSelectedNotificationDetail(null)}>
+                <Text style={styles.closeButtonText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            {selectedNotificationDetail && (
+              <ScrollView style={{ marginVertical: 10 }}>
+                <Text style={[styles.noteSubject, { fontSize: 16, marginBottom: 10, color: '#D4AF37' }]}>
+                  {selectedNotificationDetail.subject}
+                </Text>
+                <Text style={[styles.noteBody, { fontSize: 14, lineHeight: 20, color: '#F5F5F5' }]}>
+                  {selectedNotificationDetail.body}
+                </Text>
+                <Text style={[styles.noteTime, { marginTop: 14, fontSize: 11, color: '#888' }]}>
+                  Received: {new Date(selectedNotificationDetail.sent_at).toLocaleString()}
+                </Text>
+                
+                <TouchableOpacity
+                  style={{
+                    marginTop: 24,
+                    paddingVertical: 12,
+                    backgroundColor: '#D4AF37',
+                    borderRadius: 8,
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                  onPress={() => {
+                    setSelectedNotificationDetail(null);
+                    setShowNotifications(false);
+                  }}
+                >
+                  <Text style={{ color: '#141414', fontFamily: 'Poppins-Bold', fontWeight: 'bold', fontSize: 12 }}>
+                    OK, GO TO DASHBOARD
+                  </Text>
+                </TouchableOpacity>
+              </ScrollView>
+            )}
           </View>
         </View>
       </Modal>
@@ -879,7 +1010,7 @@ const styles = StyleSheet.create({
   },
   tabIconMoneyText: {
     fontFamily: 'Poppins-Black',
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '900',
     marginTop: -1,
   },

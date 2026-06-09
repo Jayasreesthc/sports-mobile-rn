@@ -417,11 +417,24 @@ const ScorerDashboard = ({
                     <View style={styles.scorecardContainer}>
                       <Text style={styles.scorecardTeamTitle}>{selectedCompletedMatch.team_a?.name || selectedCompletedMatch.team_a_name || 'Team A'} Roster</Text>
                       <View style={{ marginBottom: 16, paddingLeft: 4 }}>
-                        {(selectedCompletedMatch.team_a?.players || []).map((p, idx) => (
-                          <Text key={idx} style={{ fontSize: 14, color: '#F5F5F5', marginVertical: 6 }}>
-                            👤 {p.player?.full_name || p.player?.email || 'Unknown Player'}
-                          </Text>
-                        ))}
+                        {(selectedCompletedMatch.team_a?.players || []).map((p, idx) => {
+                          const pId = p.player_id || p.player?.id;
+                          const perf = (selectedCompletedMatch.performances || []).find(pf => String(pf.player_id) === String(pId));
+                          const runs = perf?.runs_scored ?? p.runs_scored ?? p.performance?.runs_scored ?? 0;
+                          const balls = perf?.balls_faced ?? p.balls_faced ?? p.performance?.balls_faced ?? 0;
+                          const wickets = perf?.wickets_taken ?? p.wickets_taken ?? p.performance?.wickets_taken ?? 0;
+                          const conceded = perf?.runs_conceded ?? p.runs_conceded ?? p.performance?.runs_conceded ?? 0;
+                          return (
+                            <View key={idx} style={{ marginVertical: 6 }}>
+                              <Text style={{ fontSize: 14, color: '#F5F5F5' }}>
+                                👤 {p.player?.full_name || p.player?.email || 'Unknown Player'}
+                              </Text>
+                              <Text style={{ fontSize: 11, color: '#D4AF37', marginLeft: 20, marginTop: 2 }}>
+                                Batting: {runs} runs ({balls}b) • Bowling: {wickets} wkt ({conceded}r)
+                              </Text>
+                            </View>
+                          );
+                        })}
                         {(!selectedCompletedMatch.team_a?.players || selectedCompletedMatch.team_a.players.length === 0) && (
                           <Text style={{ fontSize: 13, color: '#888', fontStyle: 'italic' }}>No registered players.</Text>
                         )}
@@ -429,11 +442,24 @@ const ScorerDashboard = ({
 
                       <Text style={styles.scorecardTeamTitle}>{selectedCompletedMatch.team_b?.name || selectedCompletedMatch.team_b_name || 'Team B'} Roster</Text>
                       <View style={{ paddingLeft: 4 }}>
-                        {(selectedCompletedMatch.team_b?.players || []).map((p, idx) => (
-                          <Text key={idx} style={{ fontSize: 14, color: '#F5F5F5', marginVertical: 6 }}>
-                            👤 {p.player?.full_name || p.player?.email || 'Unknown Player'}
-                          </Text>
-                        ))}
+                        {(selectedCompletedMatch.team_b?.players || []).map((p, idx) => {
+                          const pId = p.player_id || p.player?.id;
+                          const perf = (selectedCompletedMatch.performances || []).find(pf => String(pf.player_id) === String(pId));
+                          const runs = perf?.runs_scored ?? p.runs_scored ?? p.performance?.runs_scored ?? 0;
+                          const balls = perf?.balls_faced ?? p.balls_faced ?? p.performance?.balls_faced ?? 0;
+                          const wickets = perf?.wickets_taken ?? p.wickets_taken ?? p.performance?.wickets_taken ?? 0;
+                          const conceded = perf?.runs_conceded ?? p.runs_conceded ?? p.performance?.runs_conceded ?? 0;
+                          return (
+                            <View key={idx} style={{ marginVertical: 6 }}>
+                              <Text style={{ fontSize: 14, color: '#F5F5F5' }}>
+                                👤 {p.player?.full_name || p.player?.email || 'Unknown Player'}
+                              </Text>
+                              <Text style={{ fontSize: 11, color: '#D4AF37', marginLeft: 20, marginTop: 2 }}>
+                                Batting: {runs} runs ({balls}b) • Bowling: {wickets} wkt ({conceded}r)
+                              </Text>
+                            </View>
+                          );
+                        })}
                         {(!selectedCompletedMatch.team_b?.players || selectedCompletedMatch.team_b.players.length === 0) && (
                           <Text style={{ fontSize: 13, color: '#888', fontStyle: 'italic' }}>No registered players.</Text>
                         )}
